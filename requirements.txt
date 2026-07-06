@@ -1,0 +1,13 @@
+aliyun-python-sdk-core
+edge-tts
+fastapi
+flask
+joblib
+numpy
+openai
+pandas
+python-dotenv
+requests
+scikit-learn
+tensorflow
+uvicorn
