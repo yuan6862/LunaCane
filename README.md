@@ -22,6 +22,7 @@ voice/
   main_server.py           # FastAPI 语音服务
   luna_core.py             # ASR -> LLM -> TTS -> wav
 docs/
+  任务纲领.md
   故障排查记录.md
 config/
 ```
