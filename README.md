@@ -23,6 +23,7 @@ voice/
   luna_core.py             # ASR -> LLM -> TTS -> wav
 docs/
   任务纲领.md
+  实习日记提纲-2026-07-06.md
   故障排查记录.md
 config/
 ```
