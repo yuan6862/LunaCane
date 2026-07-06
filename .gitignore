@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.env
+.venv/
+venv/
+env/
+
+# Local data and model outputs
+data/raw/
+models/
+voice/audios/
+
+# Large local binaries
+voice/ffmpeg.exe
+voice/ffplay.exe
+voice/ffprobe.exe
+
+# IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+hs_err_pid*.log
