@@ -10,7 +10,7 @@ import pandas as pd
 import tensorflow as tf
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, confusion_matrix
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import GroupShuffleSplit
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils.class_weight import compute_class_weight
 from tensorflow.keras.layers import (
@@ -367,18 +367,44 @@ def convert_to_tflite(model, save_path):
     print(f"TFLite 模型已保存至: {save_path} (大小: {len(tflite_model) / 1024:.2f} KB)")
 
 
-def split_windows(X, y, test_size):
+def split_windows(X, y, groups, test_size):
     if len(np.unique(y)) < 2:
         raise ValueError("窗口标签只有一个类别。至少需要正常动作和跌倒两类数据才能训练。")
 
-    class_counts = np.bincount(y, minlength=2)
-    if np.any(class_counts < 2):
+    unique_groups = np.unique(groups)
+    if len(unique_groups) < 2:
         raise ValueError(
-            "每个类别至少需要 2 个窗口才能划分训练集和测试集。"
-            f"当前正常窗口={class_counts[0]}，跌倒窗口={class_counts[1]}。"
+            "至少需要 2 个采集文件才能按 source_file 划分训练集和测试集。"
+            f"当前采集文件数={len(unique_groups)}。"
         )
 
-    return train_test_split(X, y, test_size=test_size, random_state=42, stratify=y)
+    splitter = GroupShuffleSplit(n_splits=50, test_size=test_size, random_state=42)
+    fallback_split = None
+    for train_idx, test_idx in splitter.split(X, y, groups):
+        if fallback_split is None:
+            fallback_split = (train_idx, test_idx)
+
+        train_labels = np.unique(y[train_idx])
+        test_labels = np.unique(y[test_idx])
+        if len(train_labels) == 2 and len(test_labels) == 2:
+            return (
+                X[train_idx],
+                X[test_idx],
+                y[train_idx],
+                y[test_idx],
+                groups[train_idx],
+                groups[test_idx],
+            )
+
+    train_idx, test_idx = fallback_split
+    if len(np.unique(y[train_idx])) < 2:
+        raise ValueError(
+            "按采集文件分组后，训练集缺少正常或跌倒类别。"
+            "请增加采集文件数量，确保正常和跌倒数据分布在多个文件中。"
+        )
+
+    print("警告: 按 source_file 划分后测试集没有同时包含正常和跌倒类别，请补充更多采集文件。")
+    return X[train_idx], X[test_idx], y[train_idx], y[test_idx], groups[train_idx], groups[test_idx]
 
 
 def run_training(args):
@@ -386,16 +412,17 @@ def run_training(args):
 
     df = load_labeled_csvs(args.data_dir)
     write_quality_report(df, os.path.join(args.output_dir, "data_quality_report.json"))
-    X, y, _groups = create_sliding_windows(
+    X, y, groups = create_sliding_windows(
         df,
         window_size=args.window_size,
         step_size=args.step_size,
         fall_ratio_threshold=args.fall_ratio_threshold,
     )
 
-    X_train, X_test, y_train, y_test = split_windows(X, y, args.test_size)
+    X_train, X_test, y_train, y_test, train_groups, test_groups = split_windows(X, y, groups, args.test_size)
     X_train, X_test = fit_transform_window_scaler(X_train, X_test, os.path.join(args.output_dir, "scaler.pkl"))
     print(f"训练集: {len(X_train)} 窗口，测试集: {len(X_test)} 窗口")
+    print(f"训练文件数: {len(np.unique(train_groups))}，测试文件数: {len(np.unique(test_groups))}")
 
     results = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -403,6 +430,8 @@ def run_training(args):
         "step_size": args.step_size,
         "fall_ratio_threshold": args.fall_ratio_threshold,
         "test_size": args.test_size,
+        "train_groups": sorted(np.unique(train_groups).tolist()),
+        "test_groups": sorted(np.unique(test_groups).tolist()),
     }
 
     if args.baseline:
