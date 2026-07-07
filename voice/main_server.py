@@ -5,15 +5,26 @@ import os
 import wave
 import time
 from datetime import datetime
-from luna_core import LunaBrain
+
+try:
+    from .luna_core import LunaBrain
+except ImportError:
+    from luna_core import LunaBrain
 
 app = FastAPI()
-luna = LunaBrain()
+_luna = None
 
 VOICE_DIR = os.path.dirname(os.path.abspath(__file__))
 RECORD_DIR = os.path.join(VOICE_DIR, "audios")
 if not os.path.exists(RECORD_DIR) :
     os.makedirs(RECORD_DIR)
+
+
+def get_luna():
+    global _luna
+    if _luna is None:
+        _luna = LunaBrain()
+    return _luna
 
 
 def get_pure_pcm(wav_path) :
@@ -41,7 +52,7 @@ async def upload_audio(request: Request) :
 
         file_id = datetime.now().strftime("%H%M%S")
         # 确保 luna_core 返回的是转换后的 .wav 文件名
-        reply_filename = await luna.process_pipeline(audio_bytes, file_id)
+        reply_filename = await get_luna().process_pipeline(audio_bytes, file_id)
 
         if reply_filename == "none" :
             return {"status" : "error", "file" : "none"}

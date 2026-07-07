@@ -44,6 +44,15 @@ pip install -r requirements.txt
 
 语音服务需要 `ffmpeg`。推荐把 `ffmpeg` 加入系统 PATH；也可以在 `.env` 里设置 `LUNACANE_FFMPEG_PATH`。
 
+依赖版本在 `requirements.txt` 中使用范围约束；TensorFlow 固定为 `2.21.0`，以便本地环境和 GitHub Actions 使用同一训练/转换基础。
+
+快速验证：
+
+```bash
+python -m compileall data_collection ml voice tests
+python -m unittest discover -s tests
+```
+
 ## 跌倒检测采集
 
 1. 修改 `hardware/CollectData/CollectData.ino` 里的 WiFi 名、密码和电脑局域网 IP。
@@ -56,6 +65,14 @@ python data_collection/data_server_labeled.py
 
 4. 采集不同动作前，修改 `data_collection/data_server_labeled.py` 里的 `CURRENT_LABEL`。常用标签包括 `stand`、`walk`、`sit_down`、`put_down`、`tap`、`fall`。
 5. 数据会写入 `data/raw/bmi_data_<label>.csv`。
+
+CSV 文件至少需要包含以下列：
+
+```text
+timestamp, ax, ay, az, gx, gy, gz, acc_mag, gyro_mag, label
+```
+
+`data/sample/bmi_data_walk.csv` 提供了一个最小格式样例，仅用于确认列名和数据形态，不用于真实训练。
 
 ## 模型训练
 
