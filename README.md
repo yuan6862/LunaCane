@@ -65,15 +65,30 @@ python data_collection/data_server_labeled.py
 
 ```bash
 cd ml
-python preprocess.py
+python3 preprocess.py
 ```
 
-脚本会读取 `../data/raw/bmi_data_*.csv`，训练轻量 1D-CNN，并导出：
+脚本会读取 `../data/raw/bmi_data_*.csv`，自动跳过没有 `label` 列的 debug 数据，先做数据质检和滑动窗口切分，再训练两个模型：
+
+- RandomForest 对照模型：用于快速 sanity check 和答辩对比，不作为 ESP32 部署主模型。
+- 轻量 1D-CNN：默认部署候选模型，可导出 TensorFlow Lite。
+
+默认窗口是 100 个采样点，即 50Hz 下约 2 秒；步长 50，即 50% 重叠。常用参数示例：
+
+```bash
+python3 preprocess.py --window-size 100 --step-size 50 --epochs 50
+```
+
+训练完成后会导出：
 
 - `models/lunacane_model.keras`
 - `models/lunacane_model.tflite`
 - `models/scaler.pkl`
 - `models/scaler_params.h`
+- `models/data_quality_report.json`
+- `models/random_forest_report.json`
+- `models/cnn_report.json`
+- `models/training_summary.json`
 
 ## 语音助手
 
