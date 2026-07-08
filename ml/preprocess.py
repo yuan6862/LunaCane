@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import tensorflow as tf
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.metrics import classification_report, confusion_matrix, precision_recall_fscore_support
 from sklearn.model_selection import GroupShuffleSplit
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils.class_weight import compute_class_weight
@@ -29,9 +29,23 @@ FEATURE_COLS = ["ax", "ay", "az", "gx", "gy", "gz", "acc_mag", "gyro_mag"]
 RAW_SENSOR_COLS = ["ax", "ay", "az", "gx", "gy", "gz"]
 LABEL_COL = "label"
 FALL_LABEL = "fall"
+STANDARD_LABELS = ("stand", "walk", "sit_down", "put_down", "tap", "fall")
+ACC_MAG_INDEX = FEATURE_COLS.index("acc_mag")
+GYRO_MAG_INDEX = FEATURE_COLS.index("gyro_mag")
 
 
-def load_labeled_csvs(data_dir):
+def normalize_label(value):
+    label = str(value).strip().lower()
+    aliases = {
+        "sitdown": "sit_down",
+        "sit-down": "sit_down",
+        "putdown": "put_down",
+        "put-down": "put_down",
+    }
+    return aliases.get(label, label)
+
+
+def load_labeled_csvs(data_dir, fall_label=FALL_LABEL):
     """Load bmi_data_*.csv files that contain labels and prepare feature columns."""
     print(f"正在读取 {data_dir} 下的 CSV 数据...")
     all_files = sorted(glob.glob(os.path.join(data_dir, "bmi_data_*.csv")))
@@ -47,16 +61,18 @@ def load_labeled_csvs(data_dir):
 
         df = df.copy()
         df["source_file"] = os.path.basename(file_path)
-        df[LABEL_COL] = df[LABEL_COL].astype(str).str.strip().str.lower()
+        df[LABEL_COL] = df[LABEL_COL].map(normalize_label)
         for col in RAW_SENSOR_COLS:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+        if "esp_time_ms" in df.columns:
+            df["esp_time_ms"] = pd.to_numeric(df["esp_time_ms"], errors="coerce")
 
         if "acc_mag" not in df.columns:
             df["acc_mag"] = np.sqrt(df["ax"] ** 2 + df["ay"] ** 2 + df["az"] ** 2)
         if "gyro_mag" not in df.columns:
             df["gyro_mag"] = np.sqrt(df["gx"] ** 2 + df["gy"] ** 2 + df["gz"] ** 2)
 
-        df["numeric_label"] = (df[LABEL_COL] == FALL_LABEL).astype(int)
+        df["numeric_label"] = (df[LABEL_COL] == fall_label).astype(int)
         df_list.append(df)
 
     if skipped:
@@ -89,11 +105,13 @@ def _print_dataset_summary(df):
     print(df["source_file"].value_counts().to_string())
 
 
-def write_quality_report(df, output_path):
+def write_quality_report(df, output_path, fall_label=FALL_LABEL):
     """Write a lightweight data quality report for later experiment records."""
     label_counts = df[LABEL_COL].value_counts().to_dict()
     file_counts = df["source_file"].value_counts().to_dict()
     feature_stats = df[FEATURE_COLS].describe().to_dict()
+    sampling_stats = build_sampling_quality(df)
+    session_columns = [col for col in ("session_id", "participant", "mount_position", "note") if col in df.columns]
 
     report = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -101,14 +119,68 @@ def write_quality_report(df, output_path):
         "fall_rows": int(df["numeric_label"].sum()),
         "normal_rows": int(len(df) - df["numeric_label"].sum()),
         "label_counts": label_counts,
+        "label_mapping": build_label_mapping(df, fall_label),
         "file_counts": file_counts,
         "feature_columns": FEATURE_COLS,
         "feature_stats": feature_stats,
+        "sampling_quality": sampling_stats,
     }
+    if session_columns:
+        report["session_summary"] = (
+            df[["source_file"] + session_columns]
+            .drop_duplicates()
+            .sort_values("source_file")
+            .to_dict(orient="records")
+        )
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
     print(f"数据质检报告已保存至: {output_path}")
+
+
+def build_label_mapping(df, fall_label):
+    observed_labels = sorted(df[LABEL_COL].dropna().unique().tolist())
+    unknown_standard_labels = [label for label in observed_labels if label not in STANDARD_LABELS]
+    return {
+        "fall_label": fall_label,
+        "positive_class": [fall_label],
+        "normal_class": [label for label in observed_labels if label != fall_label],
+        "standard_labels": STANDARD_LABELS,
+        "non_standard_observed_labels": unknown_standard_labels,
+    }
+
+
+def build_sampling_quality(df):
+    """Summarize ESP sampling interval stability when esp_time_ms is available."""
+    if "esp_time_ms" not in df.columns:
+        return {"available": False, "reason": "missing esp_time_ms column"}
+
+    rows = []
+    for source_file, group in df.groupby("source_file", sort=False):
+        times = group["esp_time_ms"].dropna().astype(float).values
+        if len(times) < 2:
+            rows.append({"source_file": source_file, "available": False, "reason": "less than 2 timestamps"})
+            continue
+
+        intervals = np.diff(times)
+        valid_intervals = intervals[intervals > 0]
+        if len(valid_intervals) == 0:
+            rows.append({"source_file": source_file, "available": False, "reason": "no positive intervals"})
+            continue
+
+        rows.append(
+            {
+                "source_file": source_file,
+                "available": True,
+                "sample_count": int(len(times)),
+                "mean_interval_ms": float(np.mean(valid_intervals)),
+                "median_interval_ms": float(np.median(valid_intervals)),
+                "max_interval_ms": float(np.max(valid_intervals)),
+                "estimated_hz": float(1000.0 / np.mean(valid_intervals)),
+                "gap_count_over_60ms": int(np.sum(valid_intervals > 60)),
+            }
+        )
+    return {"available": True, "files": rows}
 
 
 def normalize_data(df, scaler_path, fit=True):
@@ -294,6 +366,85 @@ def train_random_forest_baseline(X_train, y_train, X_test, y_test, output_dir):
     return result
 
 
+def predict_rule_baseline(X, impact_acc_threshold, gyro_threshold, quiet_gyro_threshold):
+    """
+    Interpretable fall rule for comparison:
+    a fall-like window should contain impact, strong rotation, and a quiet tail.
+    """
+    acc_mag = X[:, :, ACC_MAG_INDEX]
+    gyro_mag = X[:, :, GYRO_MAG_INDEX]
+    tail_len = max(1, X.shape[1] // 4)
+
+    impact = acc_mag.max(axis=1) >= impact_acc_threshold
+    rotation = gyro_mag.max(axis=1) >= gyro_threshold
+    quiet_tail = gyro_mag[:, -tail_len:].mean(axis=1) <= quiet_gyro_threshold
+    return (impact & rotation & quiet_tail).astype(int)
+
+
+def evaluate_rule_baseline(X_test, y_test, output_dir, impact_acc_threshold, gyro_threshold, quiet_gyro_threshold):
+    y_pred = predict_rule_baseline(X_test, impact_acc_threshold, gyro_threshold, quiet_gyro_threshold)
+    report = classification_report(
+        y_test,
+        y_pred,
+        target_names=["正常动作", "跌倒"],
+        output_dict=True,
+        zero_division=0,
+    )
+    matrix = confusion_matrix(y_test, y_pred).tolist()
+    result = {
+        "model": "interpretable_rule_baseline",
+        "description": "impact + rotation + quiet tail",
+        "thresholds": {
+            "impact_acc_mag": impact_acc_threshold,
+            "gyro_mag": gyro_threshold,
+            "quiet_tail_gyro_mean": quiet_gyro_threshold,
+        },
+        "confusion_matrix": matrix,
+        "classification_report": report,
+    }
+
+    report_path = os.path.join(output_dir, "rule_baseline_report.json")
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+
+    print("\n规则基线测试集表现:")
+    print("规则: acc_mag 冲击 + gyro_mag 旋转 + 窗口尾部趋于安静")
+    print("混淆矩阵:")
+    print(np.asarray(matrix))
+    print(classification_report(y_test, y_pred, target_names=["正常动作", "跌倒"], zero_division=0))
+    print(f"规则基线评估报告已保存至: {report_path}")
+    return result
+
+
+def choose_recall_weighted_threshold(y_true, y_prob):
+    """Choose a CNN decision threshold with F2 so fall recall is weighted higher."""
+    candidates = np.round(np.arange(0.20, 0.81, 0.05), 2)
+    best = None
+    candidate_rows = []
+
+    for threshold in candidates:
+        y_pred = (y_prob >= threshold).astype(int)
+        precision, recall, f2, _ = precision_recall_fscore_support(
+            y_true,
+            y_pred,
+            beta=2.0,
+            labels=[1],
+            average="binary",
+            zero_division=0,
+        )
+        row = {
+            "threshold": float(threshold),
+            "fall_precision": float(precision),
+            "fall_recall": float(recall),
+            "fall_f2": float(f2),
+        }
+        candidate_rows.append(row)
+        if best is None or (row["fall_f2"], row["fall_recall"]) > (best["fall_f2"], best["fall_recall"]):
+            best = row
+
+    return best["threshold"], candidate_rows
+
+
 def train_cnn_model(X_train, y_train, X_test, y_test, output_dir, epochs, batch_size):
     class_weights = compute_class_weight("balanced", classes=np.array([0, 1]), y=y_train)
     class_weight_dict = {0: class_weights[0], 1: class_weights[1]}
@@ -318,8 +469,10 @@ def train_cnn_model(X_train, y_train, X_test, y_test, output_dir, epochs, batch_
         callbacks=callbacks,
     )
 
+    train_pred_prob = model.predict(X_train).flatten()
+    selected_threshold, threshold_candidates = choose_recall_weighted_threshold(y_train, train_pred_prob)
     y_pred_prob = model.predict(X_test).flatten()
-    y_pred = (y_pred_prob >= 0.5).astype(int)
+    y_pred = (y_pred_prob >= selected_threshold).astype(int)
     matrix = confusion_matrix(y_test, y_pred).tolist()
     report = classification_report(
         y_test,
@@ -343,7 +496,9 @@ def train_cnn_model(X_train, y_train, X_test, y_test, output_dir, epochs, batch_
 
     result = {
         "model": "tinyml_1d_cnn",
-        "threshold": 0.5,
+        "threshold": selected_threshold,
+        "threshold_policy": "selected on training windows by fall-class F2 score",
+        "threshold_candidates": threshold_candidates,
         "confusion_matrix": matrix,
         "classification_report": report,
     }
@@ -351,6 +506,7 @@ def train_cnn_model(X_train, y_train, X_test, y_test, output_dir, epochs, batch_
         json.dump(result, f, ensure_ascii=False, indent=2)
 
     print(f"Keras 模型已保存至: {keras_model_path}")
+    print(f"1D-CNN 判定阈值: {selected_threshold:.2f} (按跌倒类别 F2 选择，优先召回)")
     print(f"1D-CNN 评估报告已保存至: {report_path}")
     return result
 
@@ -409,9 +565,10 @@ def split_windows(X, y, groups, test_size):
 
 def run_training(args):
     os.makedirs(args.output_dir, exist_ok=True)
+    fall_label = normalize_label(args.fall_label)
 
-    df = load_labeled_csvs(args.data_dir)
-    write_quality_report(df, os.path.join(args.output_dir, "data_quality_report.json"))
+    df = load_labeled_csvs(args.data_dir, fall_label=fall_label)
+    write_quality_report(df, os.path.join(args.output_dir, "data_quality_report.json"), fall_label=fall_label)
     X, y, groups = create_sliding_windows(
         df,
         window_size=args.window_size,
@@ -420,6 +577,7 @@ def run_training(args):
     )
 
     X_train, X_test, y_train, y_test, train_groups, test_groups = split_windows(X, y, groups, args.test_size)
+    X_train_raw, X_test_raw = X_train.copy(), X_test.copy()
     X_train, X_test = fit_transform_window_scaler(X_train, X_test, os.path.join(args.output_dir, "scaler.pkl"))
     print(f"训练集: {len(X_train)} 窗口，测试集: {len(X_test)} 窗口")
     print(f"训练文件数: {len(np.unique(train_groups))}，测试文件数: {len(np.unique(test_groups))}")
@@ -429,6 +587,7 @@ def run_training(args):
         "window_size": args.window_size,
         "step_size": args.step_size,
         "fall_ratio_threshold": args.fall_ratio_threshold,
+        "label_mapping": build_label_mapping(df, fall_label),
         "test_size": args.test_size,
         "train_groups": sorted(np.unique(train_groups).tolist()),
         "test_groups": sorted(np.unique(test_groups).tolist()),
@@ -437,6 +596,14 @@ def run_training(args):
     if args.baseline:
         results["random_forest"] = train_random_forest_baseline(X_train, y_train, X_test, y_test, args.output_dir)
 
+    results["rule_baseline"] = evaluate_rule_baseline(
+        X_test_raw,
+        y_test,
+        args.output_dir,
+        args.rule_impact_acc,
+        args.rule_gyro,
+        args.rule_quiet_gyro,
+    )
     results["cnn"] = train_cnn_model(X_train, y_train, X_test, y_test, args.output_dir, args.epochs, args.batch_size)
 
     summary_path = os.path.join(args.output_dir, "training_summary.json")
@@ -452,9 +619,13 @@ def parse_args():
     parser.add_argument("--window-size", type=int, default=100, help="Number of samples per window. 100 = 2s at 50Hz.")
     parser.add_argument("--step-size", type=int, default=50, help="Sliding window step. 50 = 50%% overlap at 50Hz.")
     parser.add_argument("--fall-ratio-threshold", type=float, default=0.5, help="Fall frame ratio needed for a fall window.")
+    parser.add_argument("--fall-label", default=FALL_LABEL, help="CSV label that should be treated as the fall class.")
     parser.add_argument("--test-size", type=float, default=0.2, help="Test split ratio.")
     parser.add_argument("--epochs", type=int, default=50, help="Maximum CNN training epochs.")
     parser.add_argument("--batch-size", type=int, default=32, help="CNN batch size.")
+    parser.add_argument("--rule-impact-acc", type=float, default=2.5, help="Rule baseline impact threshold on acc_mag.")
+    parser.add_argument("--rule-gyro", type=float, default=180.0, help="Rule baseline rotation threshold on gyro_mag.")
+    parser.add_argument("--rule-quiet-gyro", type=float, default=30.0, help="Rule baseline quiet-tail gyro mean threshold.")
     parser.add_argument("--no-baseline", action="store_true", help="Skip RandomForest comparison model.")
     return parser.parse_args()
 
