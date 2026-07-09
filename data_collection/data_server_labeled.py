@@ -188,4 +188,4 @@ if __name__ == "__main__":
     # host="0.0.0.0" 表示允许局域网内 ESP32 访问电脑服务器
     # ESP32 代码里的 serverUrl 仍然要写电脑当前的局域网 IP，例如：
     # http://192.168.1.100:8000/sensor
-    app.run(host="0.0.0.0", port=8000, debug=True)
+    app.run(host="0.0.0.0", port=8000, debug=True, use_reloader=False)

@@ -92,7 +92,7 @@ python3 preprocess.py --window-size 100 --step-size 50 --fall-label fall --epoch
 - `models/cnn_report.json`
 - `models/training_summary.json`
 
-其中 `data_quality_report.json` 会记录标签分布、文件分布、采样间隔和异常大间隔数量；`rule_baseline_report.json` 使用“冲击 + 旋转 + 尾部趋静”的可解释规则作为对照；`cnn_report.json` 会记录 1D-CNN 自动选择的跌倒判定阈值，默认优先提高跌倒召回率。
+其中 `data_quality_report.json` 会记录标签分布、文件分布、采样间隔和异常大间隔数量；`rule_baseline_report.json` 使用“冲击 + 旋转 + 尾部趋静”的可解释规则作为对照；`cnn_report.json` 会记录 1D-CNN 自动选择的跌倒判定阈值，默认优先提高跌倒召回率。后续 ESP32/TFLite 部署时也需要同步使用这个阈值，避免训练评估和实际推理判定不一致。
 
 ## 语音助手
 
