@@ -10,6 +10,8 @@ env/
 data/raw/
 models/
 voice/audios/
+hardware/**/config.h
+.pio/
 
 # Large local binaries
 voice/ffmpeg.exe

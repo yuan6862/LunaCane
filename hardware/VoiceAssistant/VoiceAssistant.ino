@@ -2,12 +2,13 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include "driver/i2s.h"
+#include "config.h"
 
 // ================= 配置区 =================
-const char* ssid = "YOUR_2G_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
-const char* serverUrl = "http://192.168.1.100:8000/upload_audio";
-const char* downloadBaseUrl = "http://192.168.1.100:8000/get_audio/";
+const char* ssid = LUNACANE_WIFI_SSID;
+const char* password = LUNACANE_WIFI_PASSWORD;
+const char* serverUrl = LUNACANE_VOICE_UPLOAD_URL;
+const char* downloadBaseUrl = LUNACANE_VOICE_DOWNLOAD_URL;
 
 #define BUTTON_PIN     13   // 预留给开关的引脚 (GPIO 13)
 

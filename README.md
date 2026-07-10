@@ -51,13 +51,33 @@ pip install -r requirements.txt
 快速验证：
 
 ```bash
-python -m compileall data_collection ml voice tests
+python -m compileall data_collection ml voice tools tests
 python -m unittest discover -s tests
 ```
 
+## 无硬件开发与模拟
+
+新硬件到货前，可以用电脑模拟 ESP32 请求。先启动对应服务，再运行模拟器。
+
+模拟 BMI270 以 50Hz、每批 20 条回放 CSV：
+
+```bash
+python tools/simulate_imu.py data/sample/bmi_data_walk.csv
+```
+
+加上 `--no-realtime` 可以取消批次间等待，用于快速接口测试。服务地址可用 `--url` 修改。
+
+模拟语音固件上传 WAV，并把服务器返回的纯 PCM 保存到本地：
+
+```bash
+python tools/simulate_voice.py input.wav --output reply.pcm
+```
+
+语音路由测试使用 mock 流程，不需要真实的阿里云或大模型密钥。
+
 ## 跌倒检测采集
 
-1. 修改 `hardware/CollectData/CollectData.ino` 里的 WiFi 名、密码和电脑局域网 IP。
+1. 复制 `hardware/CollectData/config.example.h` 为同目录下的 `config.h`，填写 WiFi 和电脑局域网 IP。
 2. 烧录 ESP32。
 3. 在电脑上启动采集服务：
 
@@ -106,6 +126,10 @@ python3 preprocess.py --window-size 100 --step-size 50 --epochs 50
 - `models/random_forest_report.json`
 - `models/cnn_report.json`
 - `models/training_summary.json`
+- `models/model_metadata.json`
+- `models/model_config.h`
+
+`model_metadata.json` 和 `model_config.h` 固化了采样率、窗口大小、特征顺序、输入输出形状和判定阈值。部署时应同时使用 TFLite、`scaler_params.h` 和 `model_config.h`，避免固件参数与训练报告不一致。
 
 ## 语音助手
 
@@ -121,7 +145,16 @@ cp .env.example .env
 python voice/main_server.py
 ```
 
-然后修改 `hardware/VoiceAssistant/VoiceAssistant.ino` 里的 WiFi 名、密码和电脑局域网 IP，烧录 ESP32。按住按钮录音，松开后 ESP32 会上传音频；服务器完成 ASR、大模型回答和 TTS 后，ESP32 下载音频并播放。
+然后复制 `hardware/VoiceAssistant/config.example.h` 为同目录下的 `config.h`，填写 WiFi 和电脑局域网 IP，再烧录 ESP32。按住按钮录音，松开后 ESP32 会上传音频；服务器完成 ASR、大模型回答和 TTS 后，ESP32 下载音频并播放。
+
+两个固件由 PlatformIO CI 做无硬件编译检查。本地安装 PlatformIO 后也可运行：
+
+```bash
+cp hardware/CollectData/config.example.h hardware/CollectData/config.h
+cp hardware/VoiceAssistant/config.example.h hardware/VoiceAssistant/config.h
+platformio run --project-dir hardware/CollectData
+platformio run --project-dir hardware/VoiceAssistant
+```
 
 ## 注意事项
 
