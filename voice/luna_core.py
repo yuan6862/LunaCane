@@ -103,9 +103,9 @@ class LunaBrain:
             print(f">>> LLM 异常: {e}"); return "对不起，网络不太稳定。"
 
     async def tts_to_wav(self, text, out_file) :
+        temp_mp3 = out_file + ".mp3"
         try :
             # 1. 生成临时 mp3 (edge-tts 吐出来的原始格式)
-            temp_mp3 = out_file + ".mp3"
             communicate = edge_tts.Communicate(text=text, voice="zh-CN-XiaoxiaoNeural")
             await communicate.save(temp_mp3)
 
@@ -114,14 +114,14 @@ class LunaBrain:
                 "-ar", "16000", "-ac", "1", "-f", "wav", out_file
             ]
 
-            subprocess.run(command, check=True)
-
-            if os.path.exists(temp_mp3) :
-                os.remove(temp_mp3)
+            subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             return True
         except Exception as e :
             print(f">>> 转换失败: {e}")
             return False
+        finally :
+            if os.path.exists(temp_mp3) :
+                os.remove(temp_mp3)
 
     async def process_pipeline(self, audio_bytes, file_id):
         user_text = self.aliyun_asr(audio_bytes)
