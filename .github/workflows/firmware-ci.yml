@@ -4,14 +4,14 @@ on:
   pull_request:
     paths:
       - "hardware/**"
-      - "platformio.ini"
+      - "hardware/**/platformio.ini"
       - ".github/workflows/firmware-ci.yml"
   push:
     branches:
       - main
     paths:
       - "hardware/**"
-      - "platformio.ini"
+      - "hardware/**/platformio.ini"
       - ".github/workflows/firmware-ci.yml"
 
 jobs:
@@ -30,4 +30,6 @@ jobs:
           cp hardware/CollectData/config.example.h hardware/CollectData/config.h
           cp hardware/VoiceAssistant/config.example.h hardware/VoiceAssistant/config.h
       - name: Compile ESP32 firmware
-        run: platformio run
+        run: |
+          platformio run --project-dir hardware/CollectData
+          platformio run --project-dir hardware/VoiceAssistant

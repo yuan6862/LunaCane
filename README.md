@@ -152,7 +152,8 @@ python voice/main_server.py
 ```bash
 cp hardware/CollectData/config.example.h hardware/CollectData/config.h
 cp hardware/VoiceAssistant/config.example.h hardware/VoiceAssistant/config.h
-platformio run
+platformio run --project-dir hardware/CollectData
+platformio run --project-dir hardware/VoiceAssistant
 ```
 
 ## 注意事项
