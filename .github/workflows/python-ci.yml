@@ -26,7 +26,7 @@ jobs:
           python -m pip install -r requirements.txt
 
       - name: Compile Python files
-        run: python -m compileall data_collection ml voice tests
+        run: python -m compileall data_collection ml voice tools tests
 
       - name: Import core modules
         run: |
