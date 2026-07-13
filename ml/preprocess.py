@@ -241,7 +241,7 @@ def _export_scaler_to_header(scaler, output_dir):
     print(f"ESP32 归一化头文件已导出至: {header_path}")
 
 
-def write_deployment_metadata(output_dir, window_size, step_size, threshold):
+def write_deployment_metadata(output_dir, window_size, step_size, threshold, positive_label=FALL_LABEL):
     """Export the preprocessing and decision contract consumed by firmware."""
     metadata = {
         "schema_version": 1,
@@ -254,7 +254,7 @@ def write_deployment_metadata(output_dir, window_size, step_size, threshold):
         "input_shape": [1, int(window_size), len(FEATURE_COLS)],
         "output_shape": [1, 1],
         "decision_threshold": float(threshold),
-        "positive_label": FALL_LABEL,
+        "positive_label": normalize_label(positive_label),
         "normalization": "standard_scaler",
         "scaler_header": "scaler_params.h",
     }
@@ -376,6 +376,29 @@ def build_statistical_window_features(X):
     return np.concatenate([mean, std, min_value, max_value, peak_to_peak], axis=1)
 
 
+def build_binary_classification_metrics(y_true, y_pred):
+    """Return a stable two-class report even when one class is absent."""
+    labels = [0, 1]
+    target_names = ["正常动作", "跌倒"]
+    report = classification_report(
+        y_true,
+        y_pred,
+        labels=labels,
+        target_names=target_names,
+        output_dict=True,
+        zero_division=0,
+    )
+    matrix = confusion_matrix(y_true, y_pred, labels=labels).tolist()
+    printable_report = classification_report(
+        y_true,
+        y_pred,
+        labels=labels,
+        target_names=target_names,
+        zero_division=0,
+    )
+    return report, matrix, printable_report
+
+
 def train_random_forest_baseline(X_train, y_train, X_test, y_test, output_dir):
     """Train a classical baseline for comparison; it is not the deployment target."""
     baseline = RandomForestClassifier(
@@ -387,14 +410,7 @@ def train_random_forest_baseline(X_train, y_train, X_test, y_test, output_dir):
     baseline.fit(build_statistical_window_features(X_train), y_train)
     y_pred = baseline.predict(build_statistical_window_features(X_test))
 
-    report = classification_report(
-        y_test,
-        y_pred,
-        target_names=["正常动作", "跌倒"],
-        output_dict=True,
-        zero_division=0,
-    )
-    matrix = confusion_matrix(y_test, y_pred).tolist()
+    report, matrix, printable_report = build_binary_classification_metrics(y_test, y_pred)
     result = {"model": "random_forest_baseline", "confusion_matrix": matrix, "classification_report": report}
 
     model_path = os.path.join(output_dir, "random_forest_baseline.pkl")
@@ -406,7 +422,7 @@ def train_random_forest_baseline(X_train, y_train, X_test, y_test, output_dir):
     print("\nRandomForest 对照模型:")
     print("混淆矩阵:")
     print(np.asarray(matrix))
-    print(classification_report(y_test, y_pred, target_names=["正常动作", "跌倒"], zero_division=0))
+    print(printable_report)
     print(f"RandomForest 对照模型已保存至: {model_path}")
     print(f"RandomForest 评估报告已保存至: {report_path}")
     return result
@@ -429,14 +445,7 @@ def predict_rule_baseline(X, impact_acc_threshold, gyro_threshold, quiet_gyro_th
 
 def evaluate_rule_baseline(X_test, y_test, output_dir, impact_acc_threshold, gyro_threshold, quiet_gyro_threshold):
     y_pred = predict_rule_baseline(X_test, impact_acc_threshold, gyro_threshold, quiet_gyro_threshold)
-    report = classification_report(
-        y_test,
-        y_pred,
-        target_names=["正常动作", "跌倒"],
-        output_dict=True,
-        zero_division=0,
-    )
-    matrix = confusion_matrix(y_test, y_pred).tolist()
+    report, matrix, printable_report = build_binary_classification_metrics(y_test, y_pred)
     result = {
         "model": "interpretable_rule_baseline",
         "description": "impact + rotation + quiet tail",
@@ -457,7 +466,7 @@ def evaluate_rule_baseline(X_test, y_test, output_dir, impact_acc_threshold, gyr
     print("规则: acc_mag 冲击 + gyro_mag 旋转 + 窗口尾部趋于安静")
     print("混淆矩阵:")
     print(np.asarray(matrix))
-    print(classification_report(y_test, y_pred, target_names=["正常动作", "跌倒"], zero_division=0))
+    print(printable_report)
     print(f"规则基线评估报告已保存至: {report_path}")
     return result
 
@@ -519,19 +528,12 @@ def train_cnn_model(X_train, y_train, X_test, y_test, output_dir, epochs, batch_
     selected_threshold, threshold_candidates = choose_recall_weighted_threshold(y_train, train_pred_prob)
     y_pred_prob = model.predict(X_test).flatten()
     y_pred = (y_pred_prob >= selected_threshold).astype(int)
-    matrix = confusion_matrix(y_test, y_pred).tolist()
-    report = classification_report(
-        y_test,
-        y_pred,
-        target_names=["正常动作", "跌倒"],
-        output_dict=True,
-        zero_division=0,
-    )
+    report, matrix, printable_report = build_binary_classification_metrics(y_test, y_pred)
 
     print("\n1D-CNN 测试集表现:")
     print("混淆矩阵:")
     print(np.asarray(matrix))
-    print(classification_report(y_test, y_pred, target_names=["正常动作", "跌倒"], zero_division=0))
+    print(printable_report)
 
     keras_model_path = os.path.join(output_dir, "lunacane_model.keras")
     tflite_model_path = os.path.join(output_dir, "lunacane_model.tflite")
@@ -656,6 +658,7 @@ def run_training(args):
         args.window_size,
         args.step_size,
         results["cnn"]["threshold"],
+        positive_label=fall_label,
     )
 
     summary_path = os.path.join(args.output_dir, "training_summary.json")
