@@ -1,0 +1,35 @@
+name: Firmware CI
+
+on:
+  pull_request:
+    paths:
+      - "hardware/**"
+      - "hardware/**/platformio.ini"
+      - ".github/workflows/firmware-ci.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "hardware/**"
+      - "hardware/**/platformio.ini"
+      - ".github/workflows/firmware-ci.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install PlatformIO
+        run: python -m pip install platformio
+      - name: Create CI firmware configuration
+        run: |
+          cp hardware/CollectData/config.example.h hardware/CollectData/config.h
+          cp hardware/VoiceAssistant/config.example.h hardware/VoiceAssistant/config.h
+      - name: Compile ESP32 firmware
+        run: |
+          platformio run --project-dir hardware/CollectData
+          platformio run --project-dir hardware/VoiceAssistant

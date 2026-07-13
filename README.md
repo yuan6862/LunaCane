@@ -46,9 +46,38 @@ pip install -r requirements.txt
 
 语音服务需要 `ffmpeg`。推荐把 `ffmpeg` 加入系统 PATH；也可以在 `.env` 里设置 `LUNACANE_FFMPEG_PATH`。
 
+依赖版本在 `requirements.txt` 中使用范围约束；TensorFlow 固定为 `2.21.0`，以便本地环境和 GitHub Actions 使用同一训练/转换基础。
+
+快速验证：
+
+```bash
+python -m compileall data_collection ml voice tools tests
+python -m unittest discover -s tests
+```
+
+## 无硬件开发与模拟
+
+新硬件到货前，可以用电脑模拟 ESP32 请求。先启动对应服务，再运行模拟器。
+
+模拟 BMI270 以 50Hz、每批 20 条回放 CSV：
+
+```bash
+python tools/simulate_imu.py data/sample/bmi_data_walk.csv
+```
+
+加上 `--no-realtime` 可以取消批次间等待，用于快速接口测试。服务地址可用 `--url` 修改。
+
+模拟语音固件上传 WAV，并把服务器返回的纯 PCM 保存到本地：
+
+```bash
+python tools/simulate_voice.py input.wav --output reply.pcm
+```
+
+语音路由测试使用 mock 流程，不需要真实的阿里云或大模型密钥。
+
 ## 跌倒检测采集
 
-1. 修改 `hardware/CollectData/CollectData.ino` 里的 WiFi 名、密码和电脑局域网 IP。
+1. 复制 `hardware/CollectData/config.example.h` 为同目录下的 `config.h`，填写 WiFi 和电脑局域网 IP。
 2. 烧录 ESP32。
 3. 在电脑上启动采集服务。推荐每次采集都用命令行指定标签、采集人和安装位置：
 
@@ -58,6 +87,14 @@ python data_collection/data_server_labeled.py --label walk --participant p01 --m
 
 4. 常用标签包括 `stand`、`walk`、`sit_down`、`put_down`、`tap`、`fall`。每次采集会生成独立文件，避免不同批次混在一起。
 5. 数据会写入 `data/raw/bmi_data_<label>_<时间>.csv`，同时生成一份同名 JSON 元数据，记录标签、采集人、安装位置和备注。
+
+CSV 文件至少需要包含以下列：
+
+```text
+timestamp, ax, ay, az, gx, gy, gz, acc_mag, gyro_mag, label
+```
+
+`data/sample/bmi_data_walk.csv` 提供了一个最小格式样例，仅用于确认列名和数据形态，不用于真实训练。
 
 ## 模型训练
 
@@ -91,6 +128,10 @@ python3 preprocess.py --window-size 100 --step-size 50 --fall-label fall --epoch
 - `models/random_forest_report.json`
 - `models/cnn_report.json`
 - `models/training_summary.json`
+- `models/model_metadata.json`
+- `models/model_config.h`
+
+`model_metadata.json` 和 `model_config.h` 固化了采样率、窗口大小、特征顺序、输入输出形状和判定阈值。部署时应同时使用 TFLite、`scaler_params.h` 和 `model_config.h`，避免固件参数与训练报告不一致。
 
 其中 `data_quality_report.json` 会记录标签分布、文件分布、采样间隔和异常大间隔数量；`rule_baseline_report.json` 使用“冲击 + 旋转 + 尾部趋静”的可解释规则作为对照；`cnn_report.json` 会记录 1D-CNN 自动选择的跌倒判定阈值，默认优先提高跌倒召回率。后续 ESP32/TFLite 部署时也需要同步使用这个阈值，避免训练评估和实际推理判定不一致。
 
@@ -108,7 +149,16 @@ cp .env.example .env
 python voice/main_server.py
 ```
 
-然后修改 `hardware/VoiceAssistant/VoiceAssistant.ino` 里的 WiFi 名、密码和电脑局域网 IP，烧录 ESP32。按住按钮录音，松开后 ESP32 会上传音频；服务器完成 ASR、大模型回答和 TTS 后，ESP32 下载音频并播放。
+然后复制 `hardware/VoiceAssistant/config.example.h` 为同目录下的 `config.h`，填写 WiFi 和电脑局域网 IP，再烧录 ESP32。按住按钮录音，松开后 ESP32 会上传音频；服务器完成 ASR、大模型回答和 TTS 后，ESP32 下载音频并播放。
+
+两个固件由 PlatformIO CI 做无硬件编译检查。本地安装 PlatformIO 后也可运行：
+
+```bash
+cp hardware/CollectData/config.example.h hardware/CollectData/config.h
+cp hardware/VoiceAssistant/config.example.h hardware/VoiceAssistant/config.h
+platformio run --project-dir hardware/CollectData
+platformio run --project-dir hardware/VoiceAssistant
+```
 
 ## 注意事项
 

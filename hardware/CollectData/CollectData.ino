@@ -2,15 +2,14 @@
 #include <HTTPClient.h>
 #include <Wire.h>
 #include <SparkFun_BMI270_Arduino_Library.h>
+#include "config.h"
 
 #define SDA_PIN 1
 #define SCL_PIN 2
 
-const char* ssid = "YOUR_2G_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
-
-// 改成你电脑的局域网IP
-const char* serverUrl = "http://192.168.1.100:8000/sensor";
+const char* ssid = LUNACANE_WIFI_SSID;
+const char* password = LUNACANE_WIFI_PASSWORD;
+const char* serverUrl = LUNACANE_SENSOR_URL;
 
 BMI270 imu;
 

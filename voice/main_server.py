@@ -5,15 +5,42 @@ import os
 import wave
 import time
 from datetime import datetime
-from luna_core import LunaBrain
+from pathlib import PurePath
+from uuid import uuid4
+
+try:
+    from .luna_core import LunaBrain
+except ImportError:
+    from luna_core import LunaBrain
 
 app = FastAPI()
-luna = LunaBrain()
+_luna = None
 
 VOICE_DIR = os.path.dirname(os.path.abspath(__file__))
 RECORD_DIR = os.path.join(VOICE_DIR, "audios")
 if not os.path.exists(RECORD_DIR) :
     os.makedirs(RECORD_DIR)
+
+
+def make_reply_file_id():
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    return f"{timestamp}_{uuid4().hex[:8]}"
+
+
+def is_safe_audio_filename(filename: str) -> bool:
+    if "/" in filename or "\\" in filename:
+        return False
+    path = PurePath(filename)
+    if path.name != filename:
+        return False
+    return filename.startswith("reply_") and filename.endswith(".wav")
+
+
+def get_luna():
+    global _luna
+    if _luna is None:
+        _luna = LunaBrain()
+    return _luna
 
 
 def get_pure_pcm(wav_path) :
@@ -39,9 +66,9 @@ async def upload_audio(request: Request) :
         if not audio_bytes :
             return JSONResponse(status_code=400, content={"message" : "No data received"})
 
-        file_id = datetime.now().strftime("%H%M%S")
+        file_id = make_reply_file_id()
         # 确保 luna_core 返回的是转换后的 .wav 文件名
-        reply_filename = await luna.process_pipeline(audio_bytes, file_id)
+        reply_filename = await get_luna().process_pipeline(audio_bytes, file_id)
 
         if reply_filename == "none" :
             return {"status" : "error", "file" : "none"}
@@ -55,6 +82,9 @@ async def upload_audio(request: Request) :
 
 @app.get("/get_audio/{filename}")
 async def get_audio(filename: str) :
+    if not is_safe_audio_filename(filename):
+        return Response(status_code=400)
+
     file_path = os.path.join(RECORD_DIR, filename)
 
     # 核心修复：如果是请求 wav，我们剥离头部发 PCM
