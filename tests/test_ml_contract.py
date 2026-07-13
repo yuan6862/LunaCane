@@ -6,7 +6,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from ml.preprocess import FEATURE_COLS, create_sliding_windows, write_deployment_metadata
+from ml.preprocess import (
+    FEATURE_COLS,
+    build_binary_classification_metrics,
+    create_sliding_windows,
+    write_deployment_metadata,
+)
 
 
 class DeploymentContractTests(unittest.TestCase):
@@ -21,6 +26,25 @@ class DeploymentContractTests(unittest.TestCase):
         self.assertEqual(metadata["input_shape"], [1, 100, 8])
         self.assertIn("MODEL_FALL_THRESHOLD = 0.420000f", header)
         self.assertIn("MODEL_WINDOW_SIZE = 100", header)
+
+    def test_metadata_records_custom_positive_label(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            metadata = write_deployment_metadata(
+                tmpdir, 100, 50, 0.42, positive_label="sitdown"
+            )
+
+        self.assertEqual(metadata["positive_label"], "sit_down")
+
+    def test_binary_metrics_keep_two_classes_for_single_class_test_set(self):
+        report, matrix, printable_report = build_binary_classification_metrics(
+            np.array([0, 0]), np.array([0, 1])
+        )
+
+        self.assertEqual(np.asarray(matrix).shape, (2, 2))
+        self.assertIn("正常动作", report)
+        self.assertIn("跌倒", report)
+        self.assertIn("正常动作", printable_report)
+        self.assertIn("跌倒", printable_report)
 
     def test_windows_never_cross_recording_boundaries(self):
         rows = []
